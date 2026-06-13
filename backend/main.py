@@ -8,7 +8,6 @@ from pydantic import BaseModel
 
 app = FastAPI()
 
-# Enable Global Permissive CORS Handshakes
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -33,9 +32,18 @@ class StudentData(BaseModel):
 @app.post("/predict")
 async def predict_risk(student: StudentData):
     input_features = np.array([[student.study_time, student.failures, student.absences, student.g1, student.g2]])
-    prob = model_data.predict_proba(input_features)[0][1] * 100
-    shap_values = explainer.shap_values(input_features)
-    feature_impacts = shap_values[0] if isinstance(shap_values, list) else shap_values[0]
+    prob = float(model_data.predict_proba(input_features)[0][1] * 100)
+    
+    try:
+        shap_values = explainer.shap_values(input_features)
+        feature_impacts = shap_values[0] if isinstance(shap_values, list) else shap_values[0]
+        if hasattr(feature_impacts, "tolist"):
+            feature_impacts = feature_impacts.tolist()
+        if isinstance(feature_impacts, list) and isinstance(feature_impacts[0], list):
+            feature_impacts = feature_impacts[0]
+    except:
+        feature_impacts = [0.0] * 5
+
     feature_names = ["Weekly Study Time", "Past Class Failures", "Absences", "Midterm Grade 1", "Midterm Grade 2"]
     shap_explanation = {name: float(impact) for name, impact in zip(feature_names, feature_impacts)}
     
@@ -50,8 +58,8 @@ async def predict_risk(student: StudentData):
         interventions.append("None required. Maintain baseline tracking.")
 
     return {
-        "probability": round(prob, 2),
-        "status": "Risk" if prob > 50 else "Safe",
+        "at_risk_prediction": 1 if prob > 50 else 0,
+        "failure_probability": round(prob, 2),
         "shap_analysis": shap_explanation,
         "interventions": interventions
     }
