@@ -22,33 +22,32 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "student_model.joblib")
 DB_PATH = os.path.join(BASE_DIR, "failsafe.db")
 
+# Global Active Backup Cache to bypass Render container spin-down limits
+GLOBAL_HISTORY_CACHE = []
+
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS predictions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            study_time INTEGER,
-            absences INTEGER,
-            probability REAL,
-            prediction INTEGER
-        )
-    ''')
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=10)
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS predictions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                study_time INTEGER,
+                absences INTEGER,
+                probability REAL,
+                prediction INTEGER
+            )
+        ''')
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Database setup bypass: {e}")
 
 init_db()
 
 model_data = joblib.load(MODEL_PATH)
 base_model = model_data.estimator if hasattr(model_data, 'estimator') else model_data
 explainer = shap.TreeExplainer(base_model)
-
-class StudentData(BaseModel):
-    study_time: int
-    failures: int
-    absences: int
-    g1: int
-    g2: int
 
 @app.post("/predict")
 async def predict_risk(payload: dict):
@@ -101,17 +100,30 @@ async def predict_risk(payload: dict):
     pred_val = 1 if prob > 50 else 0
     prob_val = round(prob, 2)
 
+    # Backup to Runtime Memory Cache immediately
+    cache_record = {
+        "id": len(GLOBAL_HISTORY_CACHE) + 1,
+        "study": study_time,
+        "study_time": study_time,
+        "absences": absences,
+        "probability": prob_val,
+        "failure_probability": prob_val,
+        "prediction": pred_val,
+        "at_risk_prediction": pred_val
+    }
+    GLOBAL_HISTORY_CACHE.insert(0, cache_record)
+
+    # Context managed file logging with timeout safety margins
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO predictions (study_time, absences, probability, prediction)
-            VALUES (?, ?, ?, ?)
-        ''', (study_time, absences, prob_val, pred_val))
-        conn.commit()
-        conn.close()
-    except:
-        pass
+        with sqlite3.connect(DB_PATH, timeout=10) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO predictions (study_time, absences, probability, prediction)
+                VALUES (?, ?, ?, ?)
+            ''', (study_time, absences, prob_val, pred_val))
+            conn.commit()
+    except Exception as e:
+        print(f"File log deferred: {e}")
 
     return {
         "at_risk_prediction": pred_val,
@@ -123,12 +135,14 @@ async def predict_risk(payload: dict):
 @app.get("/history")
 async def get_history():
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, study_time, absences, probability, prediction FROM predictions ORDER BY id DESC")
-        rows = cursor.fetchall()
-        conn.close()
-        
+        with sqlite3.connect(DB_PATH, timeout=10) as conn:
+            cursor = conn.conn.cursor() if hasattr(conn, 'conn') else conn.cursor()
+            cursor.execute("SELECT id, study_time, absences, probability, prediction FROM predictions ORDER BY id DESC")
+            rows = cursor.fetchall()
+            
+        if not rows and GLOBAL_HISTORY_CACHE:
+            return {"history": GLOBAL_HISTORY_CACHE}
+            
         parsed_rows = [{
             "id": r[0],
             "study": r[1],
@@ -140,6 +154,7 @@ async def get_history():
             "at_risk_prediction": r[4]
         } for r in rows]
         
-        return {"history": parsed_rows, "predictions": parsed_rows, "data": parsed_rows}
-    except:
-        return {"history": []}
+        return {"history": parsed_rows}
+    except Exception as e:
+        # If SQLite thread returns locked or uninitialized, serve from memory fallback
+        return {"history": GLOBAL_HISTORY_CACHE}

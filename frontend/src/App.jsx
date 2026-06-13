@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from "react";
-import axios from "axios";
+import axios from "axios"; // Fixed import: explicitly using the core axios engine
 
-// Standardizing direct layout access to production backend link
 const API_BASE = "https://failsafe-ml-portal.onrender.com";
 
 function App() {
@@ -25,7 +24,7 @@ function App() {
         setHistory(res.data);
       }
     } catch (err) {
-      console.error("Failed to sync ledger", err);
+      console.error("Failed to sync database ledger", err);
     }
   };
 
@@ -47,9 +46,9 @@ function App() {
     try {
       const res = await axios.post(`${API_BASE}/predict`, formData);
       setResult(res.data);
-      await fetchHistory(); // Automatically populates database row without reloading
+      await fetchHistory(); // Instantly syncs the ledger table below
     } catch (err) {
-      alert("API handshake failed.");
+      alert("API handshake failed. Check your server status.");
     } finally {
       setLoading(false);
     }
@@ -63,7 +62,7 @@ function App() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "24px" }}>
           
           {/* Form Card Layout */}
-          <div style={{ backgroundColor: "#ffffff", padding: "24px", borderRadius: "16px", boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)", display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div style={{ backgroundColor: "#ffffff", padding: "24px", borderRadius: "16px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)", display: "flex", flexDirection: "column", gap: "16px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <h2 style={{ fontSize: "20px", fontWeight: "700", color: "#1e293b", margin: 0 }}>Student Profile Entry</h2>
               <div style={{ display: "flex", gap: "8px" }}>
@@ -75,7 +74,7 @@ function App() {
             <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
               <div>
                 <label style={{ display: "block", fontSize: "12px", fontWeight: "600", color: "#64748b", marginBottom: "4px" }}>Weekly Study Time</label>
-                <select value={formData.study_time} onChange={(e) => setFormData({...formData, study_time: parseInt(e.target.value)})} style={{ padding: "8px", borderRadius: "8px", border: "1px solid #cbd5e1", backgroundColor: "#f8fafc", width: "100%", boxSizing: "border-box" }}>
+                <select value={formData.study_time} onChange={(e) => setFormData({...formData, study_time: parseInt(e.target.value)})} style={{ padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1", backgroundColor: "#f8fafc", width: "100%", boxSizing: "border-box", color: "#334155" }}>
                   <option value={1}>1: Under 2 Hours</option>
                   <option value={2}>2: 2 to 5 Hours</option>
                   <option value={3}>3: 5 to 10 Hours</option>
@@ -85,26 +84,26 @@ function App() {
 
               <div>
                 <label style={{ display: "block", fontSize: "12px", fontWeight: "600", color: "#64748b", marginBottom: "4px" }}>Total Semester Absences</label>
-                <input type="number" value={formData.absences} onChange={(e) => setFormData({...formData, absences: parseInt(e.target.value) || 0})} style={{ width: "100%", boxSizing: "border-box", padding: "8px", borderRadius: "8px", border: "1px solid #cbd5e1" }} />
+                <input type="number" value={formData.absences} onChange={(e) => setFormData({...formData, absences: parseInt(e.target.value) || 0})} style={{ width: "100%", boxSizing: "border-box", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1", backgroundColor: "#f8fafc" }} />
               </div>
 
               <div>
                 <label style={{ display: "block", fontSize: "12px", fontWeight: "600", color: "#64748b", marginBottom: "4px" }}>Past Class Failures</label>
-                <input type="number" value={formData.failures} onChange={(e) => setFormData({...formData, failures: parseInt(e.target.value) || 0})} style={{ width: "100%", boxSizing: "border-box", padding: "8px", borderRadius: "8px", border: "1px solid #cbd5e1" }} />
+                <input type="number" value={formData.failures} onChange={(e) => setFormData({...formData, failures: parseInt(e.target.value) || 0})} style={{ width: "100%", boxSizing: "border-box", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1", backgroundColor: "#f8fafc" }} />
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
                 <div>
                   <label style={{ display: "block", fontSize: "11px", fontWeight: "600", color: "#64748b", marginBottom: "4px" }}>Midterm 1 (0-20)</label>
-                  <input type="number" value={formData.g1} onChange={(e) => setFormData({...formData, g1: parseInt(e.target.value) || 0})} style={{ width: "100%", boxSizing: "border-box", padding: "8px", borderRadius: "8px", border: "1px solid #cbd5e1" }} />
+                  <input type="number" value={formData.g1} onChange={(e) => setFormData({...formData, g1: parseInt(e.target.value) || 0})} style={{ width: "100%", boxSizing: "border-box", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1", backgroundColor: "#f8fafc" }} />
                 </div>
                 <div>
                   <label style={{ display: "block", fontSize: "11px", fontWeight: "600", color: "#64748b", marginBottom: "4px" }}>Midterm 2 (0-20)</label>
-                  <input type="number" value={formData.g2} onChange={(e) => setFormData({...formData, g2: parseInt(e.target.value) || 0})} style={{ width: "100%", boxSizing: "border-box", padding: "8px", borderRadius: "8px", border: "1px solid #cbd5e1" }} />
+                  <input type="number" value={formData.g2} onChange={(e) => setFormData({...formData, g2: parseInt(e.target.value) || 0})} style={{ width: "100%", boxSizing: "border-box", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1", backgroundColor: "#f8fafc" }} />
                 </div>
               </div>
 
-              <button type="submit" disabled={loading} style={{ marginTop: "10px", width: "100%", padding: "12px", backgroundColor: "#2563eb", color: "#ffffff", border: "none", borderRadius: "10px", fontWeight: "700", cursor: "pointer", boxShadow: "0 2px 4px rgba(0,0,0,0.1)" }}>
+              <button type="submit" disabled={loading} style={{ marginTop: "10px", width: "100%", padding: "12px", backgroundColor: "#2563eb", color: "#ffffff", border: "none", borderRadius: "10px", fontWeight: "700", cursor: "pointer", boxShadow: "0 2px 4px rgba(0,0,0,0.05)" }}>
                 {loading ? "Processing AI Weights..." : "Run Predictive Diagnostics"}
               </button>
             </form>
@@ -120,8 +119,8 @@ function App() {
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: "16px", flex: 1, justifyContent: "space-between" }}>
-                <div style={{ padding: "12px", borderRadius: "10px", textAlign: "center", font_weight: "700", backgroundColor: result.at_risk_prediction === 1 ? "#fef2f2" : "#ecfdf5", color: result.at_risk_prediction === 1 ? "#991b1b" : "#065f46", border: `1px solid ${result.at_risk_prediction === 1 ? "#fca5a5" : "#6ee7b7"}` }}>
-                  <span style={{ fontWeight: "700" }}>Status: {result.at_risk_prediction === 1 ? "❌ AT ACADEMIC RISK" : "✅ ACADEMICALLY SECURE"}</span>
+                <div style={{ padding: "12px", borderRadius: "10px", textAlign: "center", fontWeight: "700", backgroundColor: result.at_risk_prediction === 1 ? "#fef2f2" : "#ecfdf5", color: result.at_risk_prediction === 1 ? "#991b1b" : "#065f46", border: `1px solid ${result.at_risk_prediction === 1 ? "#fca5a5" : "#6ee7b7"}` }}>
+                  Status: {result.at_risk_prediction === 1 ? "❌ AT ACADEMIC RISK" : "✅ ACADEMICALLY SECURE"}
                   <div style={{ fontSize: "22px", fontWeight: "800", marginTop: "4px" }}>Failure Probability: {result.failure_probability}%</div>
                 </div>
 
@@ -157,14 +156,14 @@ function App() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px", textAlign: "left" }}>
               <thead>
                 <tr style={{ backgroundColor: "#f8fafc", borderBottom: "2px solid #e2e8f0", color: "#64748b", fontWeight: "700" }}>
-                  <th style={{ padding: "10px" }}>ID</th>
-                  <th style={{ padding: "10px" }}>Study (Hrs)</th>
-                  <th style={{ padding: "10px" }}>Absences</th>
-                  <th style={{ padding: "10px" }}>Probability</th>
-                  <th style={{ padding: "10px" }}>Prediction</th>
+                  <th style={{ padding: "12px" }}>ID</th>
+                  <th style={{ padding: "12px" }}>Study (Hrs)</th>
+                  <th style={{ padding: "12px" }}>Absences</th>
+                  <th style={{ padding: "12px" }}>Probability</th>
+                  <th style={{ padding: "12px" }}>Prediction</th>
                 </tr>
               </thead>
-              <tbody style={{ fontWeight: "500" }}>
+              <tbody style={{ fontWeight: "500", color: "#475569" }}>
                 {history.length === 0 ? (
                   <tr>
                     <td colSpan="5" style={{ padding: "16px", textAlign: "center", color: "#94a3b8", fontStyle: "italic" }}>No recorded matrix entries found inside failsafe.db</td>
@@ -172,11 +171,11 @@ function App() {
                 ) : (
                   history.map((row) => (
                     <tr key={row.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                      <td style={{ padding: "10px", fontFamily: "monospace", color: "#94a3b8" }}>#{row.id}</td>
-                      <td style={{ padding: "10px" }}>{row.study || row.study_time}</td>
-                      <td style={{ padding: "10px" }}>{row.absences}</td>
-                      <td style={{ padding: "10px", color: "#2563eb", fontFamily: "monospace" }}>{row.probability || row.failure_probability}%</td>
-                      <td style={{ padding: "10px" }}>
+                      <td style={{ padding: "12px", fontFamily: "monospace", color: "#94a3b8" }}>#{row.id}</td>
+                      <td style={{ padding: "12px" }}>{row.study || row.study_time}</td>
+                      <td style={{ padding: "12px" }}>{row.absences}</td>
+                      <td style={{ padding: "12px", color: "#2563eb", fontFamily: "monospace" }}>{row.probability || row.failure_probability}%</td>
+                      <td style={{ padding: "12px" }}>
                         <span style={{ padding: "2px 6px", borderRadius: "4px", fontSize: "11px", fontWeight: "700", backgroundColor: (row.prediction === 1 || row.at_risk_prediction === 1) ? "#fee2e2" : "#d1fae5", color: (row.prediction === 1 || row.at_risk_prediction === 1) ? "#991b1b" : "#065f46" }}>
                           {(row.prediction === 1 || row.at_risk_prediction === 1) ? "Risk" : "Safe"}
                         </span>
