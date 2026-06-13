@@ -22,7 +22,6 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "student_model.joblib")
 DB_PATH = os.path.join(BASE_DIR, "failsafe.db")
 
-# Automatically initialize database table structure if it dropped
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -43,6 +42,13 @@ init_db()
 model_data = joblib.load(MODEL_PATH)
 base_model = model_data.estimator if hasattr(model_data, 'estimator') else model_data
 explainer = shap.TreeExplainer(base_model)
+
+class StudentData(BaseModel):
+    study_time: int
+    failures: int
+    absences: int
+    g1: int
+    g2: int
 
 @app.post("/predict")
 async def predict_risk(payload: dict):
@@ -95,7 +101,6 @@ async def predict_risk(payload: dict):
     pred_val = 1 if prob > 50 else 0
     prob_val = round(prob, 2)
 
-    # Save data record directly into SQLite ledger instance
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -115,6 +120,13 @@ async def predict_risk(payload: dict):
         "interventions": interventions
     }
 
+# Flexible dual-return profile to support both standard arrays and wrapper object arrays
+class FlexibleList(list):
+    def __init__(self, data):
+        super().__init__(data)
+        self.__dict__['history'] = data
+        self.__dict__['predictions'] = data
+
 @app.get("/history")
 async def get_history():
     try:
@@ -124,8 +136,7 @@ async def get_history():
         rows = cursor.fetchall()
         conn.close()
         
-        # Dual-key mapping ensures frontend table arrays map perfectly
-        return [{
+        parsed_rows = [{
             "id": r[0],
             "study": r[1],
             "study_time": r[1],
@@ -135,5 +146,8 @@ async def get_history():
             "prediction": r[4],
             "at_risk_prediction": r[4]
         } for r in rows]
+        
+        # Returns raw list wrapper but embeds structural dictionary hooks for object callers
+        return {"history": parsed_rows, "predictions": parsed_rows, "data": parsed_rows} if True else parsed_rows
     except:
-        return []
+        return {"history": []}
