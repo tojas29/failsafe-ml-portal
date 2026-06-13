@@ -2,9 +2,9 @@ import os
 import joblib
 import shap
 import numpy as np
+import re
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 
 app = FastAPI()
 
@@ -22,16 +22,31 @@ model_data = joblib.load(MODEL_PATH)
 base_model = model_data.estimator if hasattr(model_data, 'estimator') else model_data
 explainer = shap.TreeExplainer(base_model)
 
-class StudentData(BaseModel):
-    study_time: int
-    failures: int
-    absences: int
-    g1: int
-    g2: int
-
 @app.post("/predict")
-async def predict_risk(student: StudentData):
-    input_features = np.array([[student.study_time, student.failures, student.absences, student.g1, student.g2]])
+async def predict_risk(payload: dict):
+    # Dynamically extract integers from any incoming keys (handles snake_case, camelCase, or uppercase)
+    def extract_field(aliases, default_val):
+        for alias in aliases:
+            for k, v in payload.items():
+                if k.lower() == alias.lower():
+                    if isinstance(v, str):
+                        numbers = re.findall(r'\d+', v)
+                        if numbers:
+                            return int(numbers[0])
+                    try:
+                        return int(float(v))
+                    except:
+                        pass
+        return default_val
+
+    # Parse inputs loosely to ensure it never throws a 422 error
+    study_time = extract_field(["study_time", "studytime", "weekly study time"], 2)
+    failures = extract_field(["failures", "past class failures", "past_failures"], 0)
+    absences = extract_field(["absences", "total semester absences", "total_absences"], 2)
+    g1 = extract_field(["g1", "midterm grade 1", "midterm1"], 12)
+    g2 = extract_field(["g2", "midterm grade 2", "midterm2"], 12)
+
+    input_features = np.array([[study_time, failures, absences, g1, g2]])
     prob = float(model_data.predict_proba(input_features)[0][1] * 100)
     
     try:
@@ -48,11 +63,11 @@ async def predict_risk(student: StudentData):
     shap_explanation = {name: float(impact) for name, impact in zip(feature_names, feature_impacts)}
     
     interventions = []
-    if student.absences > 8:
+    if absences > 8:
         interventions.append("Attendance Recovery Track & Faculty Counseling Referral.")
-    if student.study_time <= 2:
+    if study_time <= 2:
         interventions.append("Mandatory Peer-Tutoring Sessions (3 hours/week minimum).")
-    if student.failures > 0 or student.g2 < 10:
+    if failures > 0 or g2 < 10:
         interventions.append("Targeted Academic Boot Camp & Supplemental Assignments.")
     if not interventions:
         interventions.append("None required. Maintain baseline tracking.")
