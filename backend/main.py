@@ -120,13 +120,6 @@ async def predict_risk(payload: dict):
         "interventions": interventions
     }
 
-# Flexible dual-return profile to support both standard arrays and wrapper object arrays
-class FlexibleList(list):
-    def __init__(self, data):
-        super().__init__(data)
-        self.__dict__['history'] = data
-        self.__dict__['predictions'] = data
-
 @app.get("/history")
 async def get_history():
     try:
@@ -147,7 +140,6 @@ async def get_history():
             "at_risk_prediction": r[4]
         } for r in rows]
         
-        # Returns raw list wrapper but embeds structural dictionary hooks for object callers
-        return {"history": parsed_rows, "predictions": parsed_rows, "data": parsed_rows} if True else parsed_rows
+        return {"history": parsed_rows, "predictions": parsed_rows, "data": parsed_rows}
     except:
         return {"history": []}
