@@ -132,9 +132,58 @@ function App() {
                   <p style={{ margin: '8px 0 0 0', fontSize: '28px', fontWeight: 'bold' }}>
                     Failure Probability: {result.failure_probability}%
                   </p>
+                  {/* SHAP Explainable AI Real-time Root Cause Graph */}
+{result.shap_analysis && (
+  <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+    <h4 style={{ margin: '0 0 4px 0', color: '#1e293b', fontSize: '14px', fontWeight: '600' }}>
+      🔍 SHAP Root-Cause Analysis (XAI Transparency)
+    </h4>
+    <p style={{ fontSize: '12px', color: '#64748b', margin: '0 0 15px 0' }}>
+      Positive values increase failure risk; negative values pull risk down.
+    </p>
+    
+    {Object.entries(result.shap_analysis).map(([feature, value]) => {
+      const isRiskDriver = value > 0;
+      const barWidth = Math.min(Math.abs(value) * 25, 100); // Scaling factor for the visual bars
+      
+      return (
+        <div key={feature} style={{ marginBottom: '12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
+            <span style={{ fontWeight: '500', color: '#475569' }}>{feature}</span>
+            <span style={{ fontWeight: '600', color: isRiskDriver ? '#dc2626' : '#16a34a' }}>
+              {isRiskDriver ? '▲' : '▼'} {Math.abs(value).toFixed(2)}
+            </span>
+          </div>
+          <div style={{ width: '100%', height: '6px', backgroundColor: '#e2e8f0', borderRadius: '3px', position: 'relative' }}>
+            <div style={{
+              width: `${barWidth}%`,
+              height: '100%',
+              backgroundColor: isRiskDriver ? '#ef4444' : '#22c55e',
+              borderRadius: '3px',
+              transition: 'width 0.4s ease-in-out',
+              // Visual split-bar layout mechanics:
+              marginLeft: isRiskDriver ? '50%' : 'auto',
+              marginRight: isRiskDriver ? 'auto' : '50%'
+            }} />
+          </div>
+        </div>
+      );
+    })}
+  </div>
+)}
                 </div>
                 <div style={styles.interventionBox}>
-                  <h4 style={{ margin: '0 0 6px 0', color: '#1e293b' }}>Prescriptive Faculty Intervention Plan:</h4>
+                  {result.interventions && result.interventions.length > 0 ? (
+  <ul style={{ paddingLeft: '20px', color: '#334155', fontSize: '14px', lineHeight: '1.6', margin: '8px 0 0 0' }}>
+    {result.interventions.map((item, idx) => (
+      <li key={idx} style={{ marginBottom: '6px' }}>{item}</li>
+    ))}
+  </ul>
+) : (
+  <p style={{ margin: '8px 0 0 0', fontSize: '14px', color: '#64748b' }}>
+    None required. Maintain current tracking.
+  </p>
+)}
                   <p style={{ margin: 0, color: '#475569', lineHeight: '1.5' }}>{result.suggested_intervention}</p>
                 </div>
               </div>
