@@ -20,7 +20,7 @@ function App() {
   // Fetch log history on page load
   const fetchHistory = async () => {
     try {
-      const response = await axios.get('http://127.0.0.1:8000/history');
+      const response = await axios.get('http://127.0.0.1:8000https://failsafe-ml-portal.onrender.com/history');
       setHistory(response.data);
     } catch (err) {
       console.error("Error connecting to FastAPI database layer", err);
@@ -52,7 +52,7 @@ function App() {
     e.preventDefault();
     setLoading(true);
     try {
-      const response = await axios.post('http://127.0.0.1:8000/predict', { data: formData });
+      const response = await axios.post('http://127.0.0.1:8000https://failsafe-ml-portal.onrender.com/predict', { data: formData });
       setResult(response.data);
       fetchHistory(); // Refresh the database timeline component instantly
     } catch (err) {
