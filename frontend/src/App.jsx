@@ -158,7 +158,7 @@ function App() {
             <div style={{
               width: `${barWidth}%`,
               height: '100%',
-              backgroundColor: isRiskDriver ? '#ef4444' : '#22c55e',
+              backgroundColor: isRiskDriver ? '#df2c18' : '#22c55e',
               borderRadius: '3px',
               transition: 'width 0.4s ease-in-out',
               // Visual split-bar layout mechanics:
