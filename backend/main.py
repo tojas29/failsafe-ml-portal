@@ -3,8 +3,10 @@ import joblib
 import shap
 import numpy as np
 import re
+import sqlite3
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 app = FastAPI()
 
@@ -18,13 +20,32 @@ app.add_middleware(
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "student_model.joblib")
+DB_PATH = os.path.join(BASE_DIR, "failsafe.db")
+
+# Automatically initialize database table structure if it dropped
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS predictions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            study_time INTEGER,
+            absences INTEGER,
+            probability REAL,
+            prediction INTEGER
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+init_db()
+
 model_data = joblib.load(MODEL_PATH)
 base_model = model_data.estimator if hasattr(model_data, 'estimator') else model_data
 explainer = shap.TreeExplainer(base_model)
 
 @app.post("/predict")
 async def predict_risk(payload: dict):
-    # Dynamically extract integers from any incoming keys (handles snake_case, camelCase, or uppercase)
     def extract_field(aliases, default_val):
         for alias in aliases:
             for k, v in payload.items():
@@ -39,8 +60,7 @@ async def predict_risk(payload: dict):
                         pass
         return default_val
 
-    # Parse inputs loosely to ensure it never throws a 422 error
-    study_time = extract_field(["study_time", "studytime", "weekly study time"], 2)
+    study_time = extract_field(["study_time", "studytime", "weekly study time", "study"], 2)
     failures = extract_field(["failures", "past class failures", "past_failures"], 0)
     absences = extract_field(["absences", "total semester absences", "total_absences"], 2)
     g1 = extract_field(["g1", "midterm grade 1", "midterm1"], 12)
@@ -72,13 +92,48 @@ async def predict_risk(payload: dict):
     if not interventions:
         interventions.append("None required. Maintain baseline tracking.")
 
+    pred_val = 1 if prob > 50 else 0
+    prob_val = round(prob, 2)
+
+    # Save data record directly into SQLite ledger instance
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO predictions (study_time, absences, probability, prediction)
+            VALUES (?, ?, ?, ?)
+        ''', (study_time, absences, prob_val, pred_val))
+        conn.commit()
+        conn.close()
+    except:
+        pass
+
     return {
-        "at_risk_prediction": 1 if prob > 50 else 0,
-        "failure_probability": round(prob, 2),
+        "at_risk_prediction": pred_val,
+        "failure_probability": prob_val,
         "shap_analysis": shap_explanation,
         "interventions": interventions
     }
 
 @app.get("/history")
 async def get_history():
-    return []
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, study_time, absences, probability, prediction FROM predictions ORDER BY id DESC")
+        rows = cursor.fetchall()
+        conn.close()
+        
+        # Dual-key mapping ensures frontend table arrays map perfectly
+        return [{
+            "id": r[0],
+            "study": r[1],
+            "study_time": r[1],
+            "absences": r[2],
+            "probability": r[3],
+            "failure_probability": r[3],
+            "prediction": r[4],
+            "at_risk_prediction": r[4]
+        } for r in rows]
+    except:
+        return []
