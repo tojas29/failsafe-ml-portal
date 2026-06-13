@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from "react";
-import axios from "axios";
+import axios from "axios"; // Fixed package import constraint
 
-// Standardizing direct layout access to production backend link
 const API_BASE = "https://failsafe-ml-portal.onrender.com";
 
 function App() {
@@ -62,8 +61,8 @@ function App() {
     padding: "10px",
     borderRadius: "8px",
     border: "1px solid #cbd5e1",
-    backgroundColor: "#ffffff", // Explicitly forcing clean white backgrounds
-    color: "#1e293b",           // Crisp dark slate text color for visibility
+    backgroundColor: "#ffffff", // Forcing explicit white fields across all modern browsers
+    color: "#1e293b",
     fontSize: "14px"
   };
 
@@ -71,10 +70,10 @@ function App() {
     <div style={{ padding: "24px", fontFamily: "system-ui, -apple-system, sans-serif", backgroundColor: "#f1f5f9", minHeight: "100vh", color: "#334155" }}>
       <div style={{ maxWidth: "1100px", margin: "0 auto", display: "flex", flexDirection: "column", gap: "24px" }}>
         
-        {/* Main Operational Hub */}
+        {/* Upper Workspace Grid Layout */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: "24px" }}>
           
-          {/* Left Panel: Profile Input */}
+          {/* Form Entry Field */}
           <div style={{ backgroundColor: "#ffffff", padding: "24px", borderRadius: "16px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)", display: "flex", flexDirection: "column", gap: "16px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <h2 style={{ fontSize: "20px", fontWeight: "700", color: "#1e293b", margin: 0 }}>Student Profile Entry</h2>
@@ -122,7 +121,7 @@ function App() {
             </form>
           </div>
 
-          {/* Right Panel: Output Engine */}
+          {/* Right Panel: Active Diagnostic Engine */}
           <div style={{ backgroundColor: "#ffffff", padding: "24px", borderRadius: "16px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)", display: "flex", flexDirection: "column" }}>
             <h2 style={{ fontSize: "20px", fontWeight: "700", color: "#1e293b", margin: "0 0 16px 0", borderBottom: "1px solid #e2e8f0", paddingBottom: "8px", textAlign: "center" }}>Live Inference Output</h2>
             
@@ -162,7 +161,7 @@ function App() {
           </div>
         </div>
 
-        {/* Bottom Section: SQLite Database Ledger */}
+        {/* Bottom Section: Historical Database Ledger Table */}
         <div style={{ backgroundColor: "#ffffff", padding: "24px", borderRadius: "16px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)" }}>
           <h2 style={{ fontSize: "18px", fontWeight: "700", color: "#1e293b", margin: "0 0 14px 0", borderBottom: "1px solid #e2e8f0", paddingBottom: "8px", textAlign: "center" }}>Historical Database Ledger (Live SQLite)</h2>
           <div style={{ overflowX: "auto" }}>

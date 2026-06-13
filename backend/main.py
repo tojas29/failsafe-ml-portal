@@ -4,9 +4,9 @@ import shap
 import numpy as np
 import re
 import sqlite3
+import pandas as pd
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 
 app = FastAPI()
 
@@ -22,26 +22,20 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "student_model.joblib")
 DB_PATH = os.path.join(BASE_DIR, "failsafe.db")
 
-# Global Active Backup Cache to bypass Render container spin-down limits
-GLOBAL_HISTORY_CACHE = []
-
 def init_db():
-    try:
-        conn = sqlite3.connect(DB_PATH, timeout=10)
-        cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS predictions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                study_time INTEGER,
-                absences INTEGER,
-                probability REAL,
-                prediction INTEGER
-            )
-        ''')
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        print(f"Database setup bypass: {e}")
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS predictions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            study_time INTEGER,
+            absences INTEGER,
+            probability REAL,
+            prediction INTEGER
+        )
+    ''')
+    conn.commit()
+    conn.close()
 
 init_db()
 
@@ -71,11 +65,14 @@ async def predict_risk(payload: dict):
     g1 = extract_field(["g1", "midterm grade 1", "midterm1"], 12)
     g2 = extract_field(["g2", "midterm grade 2", "midterm2"], 12)
 
-    input_features = np.array([[study_time, failures, absences, g1, g2]])
-    prob = float(model_data.predict_proba(input_features)[0][1] * 100)
+    # Building a Pandas DataFrame with column headers matching your Jupyter Notebook exactly
+    feature_names = ['studytime', 'failures', 'absences', 'G1', 'G2']
+    input_df = pd.DataFrame([[study_time, failures, absences, g1, g2]], columns=feature_names)
+    
+    prob = float(model_data.predict_proba(input_df)[0][1] * 100)
     
     try:
-        shap_values = explainer.shap_values(input_features)
+        shap_values = explainer.shap_values(input_df)
         feature_impacts = shap_values[0] if isinstance(shap_values, list) else shap_values[0]
         if hasattr(feature_impacts, "tolist"):
             feature_impacts = feature_impacts.tolist()
@@ -84,8 +81,8 @@ async def predict_risk(payload: dict):
     except:
         feature_impacts = [0.0] * 5
 
-    feature_names = ["Weekly Study Time", "Past Class Failures", "Absences", "Midterm Grade 1", "Midterm Grade 2"]
-    shap_explanation = {name: float(impact) for name, impact in zip(feature_names, feature_impacts)}
+    display_names = ["Weekly Study Time", "Past Class Failures", "Absences", "Midterm Grade 1", "Midterm Grade 2"]
+    shap_explanation = {name: float(impact) for name, impact in zip(display_names, feature_impacts)}
     
     interventions = []
     if absences > 8:
@@ -100,30 +97,17 @@ async def predict_risk(payload: dict):
     pred_val = 1 if prob > 50 else 0
     prob_val = round(prob, 2)
 
-    # Backup to Runtime Memory Cache immediately
-    cache_record = {
-        "id": len(GLOBAL_HISTORY_CACHE) + 1,
-        "study": study_time,
-        "study_time": study_time,
-        "absences": absences,
-        "probability": prob_val,
-        "failure_probability": prob_val,
-        "prediction": pred_val,
-        "at_risk_prediction": pred_val
-    }
-    GLOBAL_HISTORY_CACHE.insert(0, cache_record)
-
-    # Context managed file logging with timeout safety margins
     try:
-        with sqlite3.connect(DB_PATH, timeout=10) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO predictions (study_time, absences, probability, prediction)
-                VALUES (?, ?, ?, ?)
-            ''', (study_time, absences, prob_val, pred_val))
-            conn.commit()
-    except Exception as e:
-        print(f"File log deferred: {e}")
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO predictions (study_time, absences, probability, prediction)
+            VALUES (?, ?, ?, ?)
+        ''', (study_time, absences, prob_val, pred_val))
+        conn.commit()
+        conn.close()
+    except:
+        pass
 
     return {
         "at_risk_prediction": pred_val,
@@ -135,14 +119,12 @@ async def predict_risk(payload: dict):
 @app.get("/history")
 async def get_history():
     try:
-        with sqlite3.connect(DB_PATH, timeout=10) as conn:
-            cursor = conn.conn.cursor() if hasattr(conn, 'conn') else conn.cursor()
-            cursor.execute("SELECT id, study_time, absences, probability, prediction FROM predictions ORDER BY id DESC")
-            rows = cursor.fetchall()
-            
-        if not rows and GLOBAL_HISTORY_CACHE:
-            return {"history": GLOBAL_HISTORY_CACHE}
-            
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, study_time, absences, probability, prediction FROM predictions ORDER BY id DESC")
+        rows = cursor.fetchall()
+        conn.close()
+        
         parsed_rows = [{
             "id": r[0],
             "study": r[1],
@@ -155,6 +137,5 @@ async def get_history():
         } for r in rows]
         
         return {"history": parsed_rows}
-    except Exception as e:
-        # If SQLite thread returns locked or uninitialized, serve from memory fallback
-        return {"history": GLOBAL_HISTORY_CACHE}
+    except:
+        return {"history": []}
