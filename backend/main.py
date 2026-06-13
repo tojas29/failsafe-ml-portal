@@ -8,7 +8,14 @@ import numpy as np
 app = FastAPI()
 
 # Load model and prepare SHAP explainer
-model_data = joblib.load("student_model.joblib")
+import os
+
+# Dynamically find the exact folder where main.py sits
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(BASE_DIR, "student_model.joblib")
+
+# Load model data cleanly using the absolute file path
+model_data = joblib.load(MODEL_PATH)
 # Extract the base tree model if you wrapped it in a classifier wrapper
 base_model = model_data.estimator if hasattr(model_data, 'estimator') else model_data
 explainer = shap.TreeExplainer(base_model)
