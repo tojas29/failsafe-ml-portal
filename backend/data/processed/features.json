@@ -1,0 +1,25 @@
+{
+    "features": [
+        "G1",
+        "G2",
+        "failures",
+        "studytime",
+        "absences",
+        "traveltime",
+        "famrel",
+        "freetime",
+        "goout",
+        "Dalc",
+        "Walc",
+        "health",
+        "Medu",
+        "Fedu",
+        "schoolsup",
+        "famsup",
+        "paid",
+        "activities",
+        "higher",
+        "internet",
+        "romantic"
+    ]
+}
