@@ -16,8 +16,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 
 # 1. Cloud Database Connection Setup (Using your Supabase Pooler)
-DATABASE_URL = "postgresql://postgres.vsfqobrpybnergybcale:Arnavojas2911@aws-0-ap-south-1.pooler.supabase.com:6543/postgres"
-
+DATABASE_URL = "postgresql://postgres.vsfqobrpybnergybcale:Arnavojas2911@aws-1-ap-south-1.pooler.supabase.com:6543/postgres"
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
