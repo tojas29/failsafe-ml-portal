@@ -5,9 +5,21 @@ import axios from "axios";
 const API_BASE = "https://failsafe-ml-portal.onrender.com";
 
 function App() {
-  // 1. Session & Routing Core State Hooks
-  const [token, setToken] = useState(localStorage.getItem("failsafe_token") || "");
-  const [user, setUser] = useState(JSON.parse(localStorage.getItem("failsafe_user")) || null);
+  // 1. Session & Routing Core State Hooks (With Crash-Proof Safe Initialization)
+  const [token, setToken] = useState(() => localStorage.getItem("failsafe_token") || "");
+  const [user, setUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem("failsafe_user");
+      // If it's empty, null, or a literal string "undefined", safely default to null
+      if (!saved || saved === "undefined") return null;
+      return JSON.parse(saved);
+    } catch (e) {
+      console.error("Clearing corrupted legacy local storage cache records:", e);
+      localStorage.clear();
+      return null;
+    }
+  });
+
   const [view, setView] = useState(token ? "DASHBOARD" : "LOGIN");
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState([]);
@@ -50,7 +62,6 @@ function App() {
     try {
       let res;
       if (type === "LOGIN") {
-        // OAuth2 Password form spec requires URL-encoded parameters
         const params = new URLSearchParams();
         params.append("username", authForm.email);
         params.append("password", authForm.password);
@@ -94,7 +105,6 @@ function App() {
     }
   };
 
-  // Preset quick layout injector configurations
   const loadPreset = (profile) => {
     if (profile === "EXCELLENT") {
       setStudentForm({
@@ -111,14 +121,12 @@ function App() {
     }
   };
 
-  // Component Style Presets
   const styles = {
     input: { width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px", boxSizing: "border-box" },
     label: { display: "block", fontSize: "12px", fontWeight: "600", color: "#475569", marginBottom: "4px" },
     sectionTitle: { fontSize: "14px", fontWeight: "700", color: "#1e293b", margin: "12px 0 6px 0", borderBottom: "1px solid #f1f5f9", paddingBottom: "4px" }
   };
 
-  // ==================== VIEW RENDERING PIPELINE ====================
   if (view === "LOGIN" || view === "SIGNUP") {
     return (
       <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", backgroundColor: "#0f172a", fontFamily: "system-ui" }}>
@@ -158,7 +166,6 @@ function App() {
 
   return (
     <div style={{ fontFamily: "system-ui, sans-serif", backgroundColor: "#f8fafc", minHeight: "100vh", color: "#334155" }}>
-      {/* Universal Shared Portal Navigation Banner */}
       <nav style={{ backgroundColor: "#0f172a", color: "#ffffff", padding: "14px 24px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "24px" }}>
           <span style={{ fontSize: "18px", fontWeight: "800", letterSpacing: "0.5px" }}>🛡️ FAILSAFE HUB</span>
@@ -166,13 +173,12 @@ function App() {
           <button onClick={() => { setView("PREDICT"); setResult(null); }} style={{ background: "none", border: "none", color: view === "PREDICT" ? "#3b82f6" : "#94a3b8", fontWeight: "600", cursor: "pointer" }}>+ Run Risk Assessment</button>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-          <span style={{ fontSize: "13px", color: "#94a3b8" }}>Advisor: <b style={{ color: "#fff" }}>{user?.user_name}</b></span>
+          <span style={{ fontSize: "13px", color: "#94a3b8" }}>Advisor: <b style={{ color: "#fff" }}>{user?.user_name || "Faculty Member"}</b></span>
           <button onClick={handleLogout} style={{ backgroundColor: "#334155", color: "#f8fafc", border: "none", padding: "6px 12px", borderRadius: "4px", fontSize: "12px", fontWeight: "600", cursor: "pointer" }}>Logout</button>
         </div>
       </nav>
 
       <div style={{ maxWidth: "1200px", margin: "0 auto", padding: "24px" }}>
-        {/* ==================== VIEW A: DASHBOARD HISTORICAL MATRIX ==================== */}
         {view === "DASHBOARD" && (
           <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px" }}>
@@ -224,11 +230,8 @@ function App() {
           </div>
         )}
 
-        {/* ==================== VIEW B: 21-FEATURE INTERACTIVE DIAGNOSTIC FORM ==================== */}
         {view === "PREDICT" && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px", alignItems: "start" }}>
-            
-            {/* Left Hand Data Input Panel Mapping 21 Structural Features */}
             <div style={{ backgroundColor: "#ffffff", padding: "24px", borderRadius: "8px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
                 <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "700" }}>Student Diagnostic Metric Profiler</h3>
@@ -307,7 +310,6 @@ function App() {
               </form>
             </div>
 
-            {/* Right Hand Output Presentation Panel */}
             <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
               <div style={{ backgroundColor: "#ffffff", padding: "24px", borderRadius: "8px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", minHeight: "260px" }}>
                 <h3 style={{ margin: "0 0 16px 0", fontSize: "16px", fontWeight: "700", textAlign: "center", borderBottom: "1px solid #f1f5f9", paddingBottom: "8px" }}>Live Core Inference Matrix Engine Output</h3>
@@ -344,7 +346,6 @@ function App() {
                 )}
               </div>
             </div>
-
           </div>
         )}
       </div>
