@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import axios from "axios"; // Fixed package import constraint
+import axios from "axios";
 
 const API_BASE = "https://failsafe-ml-portal.onrender.com";
 
@@ -15,21 +15,12 @@ function App() {
   const [result, setResult] = useState(null);
   const [history, setHistory] = useState([]);
 
-  const fetchHistory = async () => {
-    try {
-      const res = await axios.get(`${API_BASE}/history`);
-      if (res.data && res.data.history) {
-        setHistory(res.data.history);
-      } else if (Array.isArray(res.data)) {
-        setHistory(res.data);
-      }
-    } catch (err) {
-      console.error("Failed to sync database ledger", err);
-    }
-  };
-
+  // Load persistent history entries straight from the browser on boot
   useEffect(() => {
-    fetchHistory();
+    const savedHistory = localStorage.getItem("failsafe_history");
+    if (savedHistory) {
+      setHistory(JSON.parse(savedHistory));
+    }
   }, []);
 
   const handlePreset = (type) => {
@@ -46,10 +37,22 @@ function App() {
     try {
       const res = await axios.post(`${API_BASE}/predict`, formData);
       setResult(res.data);
-      await fetchHistory(); 
+      
+      // Construct a unified card payload mapping local values
+      const newRecord = {
+        id: Date.now(),
+        study_time: formData.study_time,
+        absences: formData.absences,
+        probability: res.data.failure_probability,
+        prediction: res.data.at_risk_prediction
+      };
+      
+      const updatedHistory = [newRecord, ...history];
+      setHistory(updatedHistory);
+      localStorage.setItem("failsafe_history", JSON.stringify(updatedHistory));
     } catch (err) {
       console.error(err);
-      alert("Backend API connection failed.");
+      alert("Backend network diagnostic channel failed.");
     } finally {
       setLoading(false);
     }
@@ -61,7 +64,7 @@ function App() {
     padding: "10px",
     borderRadius: "8px",
     border: "1px solid #cbd5e1",
-    backgroundColor: "#ffffff", // Forcing explicit white fields across all modern browsers
+    backgroundColor: "#ffffff",
     color: "#1e293b",
     fontSize: "14px"
   };
@@ -70,10 +73,9 @@ function App() {
     <div style={{ padding: "24px", fontFamily: "system-ui, -apple-system, sans-serif", backgroundColor: "#f1f5f9", minHeight: "100vh", color: "#334155" }}>
       <div style={{ maxWidth: "1100px", margin: "0 auto", display: "flex", flexDirection: "column", gap: "24px" }}>
         
-        {/* Upper Workspace Grid Layout */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: "24px" }}>
           
-          {/* Form Entry Field */}
+          {/* Profile Input Column */}
           <div style={{ backgroundColor: "#ffffff", padding: "24px", borderRadius: "16px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)", display: "flex", flexDirection: "column", gap: "16px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <h2 style={{ fontSize: "20px", fontWeight: "700", color: "#1e293b", margin: 0 }}>Student Profile Entry</h2>
@@ -115,19 +117,19 @@ function App() {
                 </div>
               </div>
 
-              <button type="submit" disabled={loading} style={{ marginTop: "10px", width: "100%", padding: "12px", backgroundColor: "#2563eb", color: "#ffffff", border: "none", borderRadius: "10px", fontWeight: "700", fontSize: "14px", cursor: "pointer", boxShadow: "0 2px 4px rgba(0,0,0,0.05)" }}>
+              <button type="submit" disabled={loading} style={{ marginTop: "10px", width: "100%", padding: "12px", backgroundColor: "#2563eb", color: "#ffffff", border: "none", borderRadius: "10px", fontWeight: "700", fontSize: "14px", cursor: "pointer" }}>
                 {loading ? "Processing AI Weights..." : "Run Predictive Diagnostics"}
               </button>
             </form>
           </div>
 
-          {/* Right Panel: Active Diagnostic Engine */}
+          {/* Diagnostic Metrics Matrix */}
           <div style={{ backgroundColor: "#ffffff", padding: "24px", borderRadius: "16px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)", display: "flex", flexDirection: "column" }}>
             <h2 style={{ fontSize: "20px", fontWeight: "700", color: "#1e293b", margin: "0 0 16px 0", borderBottom: "1px solid #e2e8f0", paddingBottom: "8px", textAlign: "center" }}>Live Inference Output</h2>
             
             {!result ? (
-              <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", fontStyle: "italic", textAlign: "center", padding: "20px" }}>
-                Awaiting input. Select a profile layout or manually alter fields to prompt real-time XGBoost matrix evaluation.
+              <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", fontStyle: "italic", textAlign: "center" }}>
+                Awaiting input data. Click run to prompt real-time XGBoost matrix evaluation.
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: "16px", flex: 1, justifyContent: "space-between" }}>
@@ -137,11 +139,11 @@ function App() {
                 </div>
 
                 <div style={{ backgroundColor: "#f8fafc", padding: "14px", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
-                  <div style={{ fontWeight: "700", fontSize: "13px", color: "#334155", marginBottom: "8px" }}>🔍 SHAP Root-Cause Analysis (XAI Transparency)</div>
+                  <div style={{ fontWeight: "700", fontSize: "13px", color: "#334155", marginBottom: "8px" }}>🔍 SHAP Root-Cause Analysis</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: "8px", fontSize: "12px" }}>
                     {Object.entries(result.shap_analysis || {}).map(([feat, val]) => (
                       <div key={feat} style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px dashed #e2e8f0", paddingBottom: "6px" }}>
-                        <span style={{ color: "#64748b", fontWeight: "500" }}>{feat}</span>
+                        <span style={{ color: "#64748b" }}>{feat}</span>
                         <span style={{ fontFamily: "monospace", fontWeight: "700", color: val >= 0 ? "#dc2626" : "#16a34a" }}>
                           {val >= 0 ? `▲ +${Number(val).toFixed(2)}` : `▼ ${Number(val).toFixed(2)}`}
                         </span>
@@ -151,9 +153,9 @@ function App() {
                 </div>
 
                 <div style={{ borderLeft: "4px solid #3b82f6", backgroundColor: "#eff6ff", padding: "14px", borderRadius: "0 10px 10px 0", fontSize: "13px" }}>
-                  <div style={{ fontWeight: "700", color: "#1e3a8a", marginBottom: "4px" }}>Tailored Action Interventions:</div>
-                  <ul style={{ margin: 0, paddingLeft: "16px", color: "#1e40af", fontWeight: "500" }}>
-                    {result.interventions?.map((item, idx) => <li key={idx} style={{ marginBottom: "4px" }}>{item}</li>)}
+                  <div style={{ fontWeight: "700", color: "#1e3a8a", marginBottom: "4px" }}>Interventions:</div>
+                  <ul style={{ margin: 0, paddingLeft: "16px", color: "#1e40af" }}>
+                    {result.interventions?.map((item, idx) => <li key={idx}>{item}</li>)}
                   </ul>
                 </div>
               </div>
@@ -161,15 +163,15 @@ function App() {
           </div>
         </div>
 
-        {/* Bottom Section: Historical Database Ledger Table */}
+        {/* Database Table Layout (Fueled by localStorage) */}
         <div style={{ backgroundColor: "#ffffff", padding: "24px", borderRadius: "16px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)" }}>
-          <h2 style={{ fontSize: "18px", fontWeight: "700", color: "#1e293b", margin: "0 0 14px 0", borderBottom: "1px solid #e2e8f0", paddingBottom: "8px", textAlign: "center" }}>Historical Database Ledger (Live SQLite)</h2>
+          <h2 style={{ fontSize: "18px", fontWeight: "700", color: "#1e293b", margin: "0 0 14px 0", borderBottom: "1px solid #e2e8f0", paddingBottom: "8px" }}>Historical Database Ledger (Browser Persisted)</h2>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px", textAlign: "left" }}>
               <thead>
-                <tr style={{ backgroundColor: "#f8fafc", borderBottom: "2px solid #e2e8f0", color: "#64748b", fontWeight: "700" }}>
-                  <th style={{ padding: "12px" }}>ID</th>
-                  <th style={{ padding: "12px" }}>Study (Hrs)</th>
+                <tr style={{ backgroundColor: "#f8fafc", borderBottom: "2px solid #e2e8f0", color: "#64748b" }}>
+                  <th style={{ padding: "12px" }}>Timestamp Hash</th>
+                  <th style={{ padding: "12px" }}>Study Option</th>
                   <th style={{ padding: "12px" }}>Absences</th>
                   <th style={{ padding: "12px" }}>Probability</th>
                   <th style={{ padding: "12px" }}>Prediction</th>
@@ -178,18 +180,18 @@ function App() {
               <tbody style={{ fontWeight: "500", color: "#475569" }}>
                 {history.length === 0 ? (
                   <tr>
-                    <td colSpan="5" style={{ padding: "20px", textAlign: "center", color: "#94a3b8", fontStyle: "italic" }}>No recorded matrix entries found inside failsafe.db</td>
+                    <td colSpan="5" style={{ padding: "20px", textAlign: "center", color: "#94a3b8", fontStyle: "italic" }}>No previous entries recorded in local web storage.</td>
                   </tr>
                 ) : (
                   history.map((row) => (
                     <tr key={row.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
                       <td style={{ padding: "12px", fontFamily: "monospace", color: "#94a3b8" }}>#{row.id}</td>
-                      <td style={{ padding: "12px" }}>{row.study ?? row.study_time}</td>
+                      <td style={{ padding: "12px" }}>Option {row.study_time}</td>
                       <td style={{ padding: "12px" }}>{row.absences}</td>
-                      <td style={{ padding: "12px", color: "#2563eb", fontFamily: "monospace" }}>{row.probability ?? row.failure_probability}%</td>
+                      <td style={{ padding: "12px", color: "#2563eb" }}>{row.probability}%</td>
                       <td style={{ padding: "12px" }}>
-                        <span style={{ padding: "3px 8px", borderRadius: "4px", fontSize: "11px", fontWeight: "700", backgroundColor: (row.prediction === 1 || row.at_risk_prediction === 1) ? "#fee2e2" : "#d1fae5", color: (row.prediction === 1 || row.at_risk_prediction === 1) ? "#991b1b" : "#065f46" }}>
-                          {(row.prediction === 1 || row.at_risk_prediction === 1) ? "Risk" : "Safe"}
+                        <span style={{ padding: "3px 8px", borderRadius: "4px", fontSize: "11px", fontWeight: "700", backgroundColor: row.prediction === 1 ? "#fee2e2" : "#d1fae5", color: row.prediction === 1 ? "#991b1b" : "#065f46" }}>
+                          {row.prediction === 1 ? "At Risk" : "Secure"}
                         </span>
                       </td>
                     </tr>
