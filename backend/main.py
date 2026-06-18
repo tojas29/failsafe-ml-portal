@@ -50,19 +50,31 @@ class AssessmentTable(Base):
 
 Base.metadata.create_all(bind=engine)
 
-# 4. Model Binary Loader
+# 4. Model Binary Loader (Dynamic Path Fallback to resolve folder mismatches)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, "models", "failsafe_model.pkl")
-CONFIG_PATH = os.path.join(BASE_DIR, "models", "threshold_config.json")
+
+# Path Option A: Inside the backend folder context
+MODEL_PATH_A = os.path.join(BASE_DIR, "models", "failsafe_model.pkl")
+CONFIG_PATH_A = os.path.join(BASE_DIR, "models", "threshold_config.json")
+
+# Path Option B: Absolute root context fallback
+MODEL_PATH_B = os.path.join(os.path.dirname(BASE_DIR), "backend", "models", "failsafe_model.pkl")
+CONFIG_PATH_B = os.path.join(os.path.dirname(BASE_DIR), "backend", "models", "threshold_config.json")
+
+# Simple verification switch to select the valid file path location
+if os.path.exists(MODEL_PATH_A):
+    chosen_model_path, chosen_config_path = MODEL_PATH_A, CONFIG_PATH_A
+else:
+    chosen_model_path, chosen_config_path = MODEL_PATH_B, CONFIG_PATH_B
 
 try:
-    model = joblib.load(MODEL_PATH)
-    with open(CONFIG_PATH, "r") as f:
+    model = joblib.load(chosen_model_path)
+    with open(chosen_config_path, "r") as f:
         threshold_config = json.load(f)
     classification_threshold = threshold_config.get("classification_threshold", 0.5)
-    print(f"✅ XGBoost Core Operational. Classification Threshold: {classification_threshold}")
+    print(f"✅ XGBoost Core Operational. Loaded from: {chosen_model_path}. Threshold: {classification_threshold}")
 except Exception as e:
-    print(f"⚠️ Model startup delay: {e}")
+    print(f"⚠️ Model startup delay / Path error details: {e}")
     model, classification_threshold = None, 0.5
 
 # 5. Data Validation Specs
