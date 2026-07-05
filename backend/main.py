@@ -3,7 +3,7 @@ import joblib
 import json
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,40 +15,12 @@ from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 
-# 1. Cloud Database Connection Setup (Using your Supabase Pooler)
-DATABASE_URL = "postgresql://postgres.vsfqobrpybnergybcale:Arnavojas2911@aws-1-ap-south-1.pooler.supabase.com:6543/postgres"
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
-
-# 2. Cryptography Configuration
-SECRET_KEY = "SUPER_SECRET_FAILSAFE_TOKEN_SIGNING_KEY_CHOOSE_A_RANDOM_HASH_FOR_PROD"
-ALGORITHM = "HS256"
-
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
-# 3. Relational Database Schemas
-class UserTable(Base):
-    __tablename__ = "users"
-    id = Column(Integer, primary_key=True, index=True)
-    email = Column(String, unique=True, index=True, nullable=False)
-    hashed_password = Column(String, nullable=False)
-    name = Column(String, nullable=False)
-
-class AssessmentTable(Base):
-    __tablename__ = "assessments"
-    id = Column(Integer, primary_key=True, index=True)
-    student_id = Column(String, index=True, nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    timestamp = Column(DateTime, default=datetime.utcnow)
-    features_payload = Column(JSON, nullable=False)
-    risk_score = Column(Float, nullable=False)
-    risk_band = Column(String, nullable=False)
-    prediction = Column(String, nullable=False)
-    shap_analysis = Column(JSON, nullable=False)
-
-Base.metadata.create_all(bind=engine)
+from database import Base, engine, get_db
+from models import User, StudentRiskAssessment
+from config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 
 # 4. Model Binary Loader (Dynamic Path Fallback to resolve folder mismatches)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -107,12 +79,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+
+def create_access_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     exception = HTTPException(status_code=401, detail="Session expired or invalid.")
@@ -122,34 +94,36 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         if email is None: raise exception
     except JWTError:
         raise exception
-    user = db.query(UserTable).filter(UserTable.email == email).first()
+    user = db.query(User).filter(User.email == email).first()
     if user is None: raise exception
     return user
 
 # 6. Auth Gateways
 @app.post("/auth/register", response_model=Token)
 async def register_faculty(user_in: UserRegister, db: Session = Depends(get_db)):
-    if db.query(UserTable).filter(UserTable.email == user_in.email).first():
+    if db.query(User).filter(User.email == user_in.email).first():
         raise HTTPException(status_code=400, detail="Email already split registered.")
     hashed_pwd = pwd_context.hash(user_in.password)
-    new_user = UserTable(email=user_in.email, hashed_password=hashed_pwd, name=user_in.name)
+    new_user = User(email=user_in.email, hashed_password=hashed_pwd, name=user_in.name)
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
-    token = jwt.encode({"sub": new_user.email}, SECRET_KEY, algorithm=ALGORITHM)
+    # token = jwt.encode({"sub": new_user.email}, SECRET_KEY, algorithm=ALGORITHM)
+    token = create_access_token({"sub": new_user.email})
     return {"access_token": token, "token_type": "bearer", "user_name": new_user.name, "user_email": new_user.email}
 
 @app.post("/auth/login", response_model=Token)
 async def login_faculty(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = db.query(UserTable).filter(UserTable.email == form_data.username).first()
+    user = db.query(User).filter(User.email == form_data.username).first()
     if not user or not pwd_context.verify(form_data.password, user.hashed_password):
         raise HTTPException(status_code=400, detail="Invalid credential parameters.")
-    token = jwt.encode({"sub": user.email}, SECRET_KEY, algorithm=ALGORITHM)
+    # token = jwt.encode({"sub": user.email}, SECRET_KEY, algorithm=ALGORITHM)
+    token = create_access_token({"sub": user.email})
     return {"access_token": token, "token_type": "bearer", "user_name": user.name, "user_email": user.email}
 
 # 7. Lightning Fast Instant Prediction Channel
 @app.post("/predict")
-async def assess_student(payload: StudentAssessmentInput, current_user: UserTable = Depends(get_current_user), db: Session = Depends(get_db)):
+async def assess_student(payload: StudentAssessmentInput, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if model is None:
         raise HTTPException(status_code=503, detail="Model assets compiling.")
 
@@ -191,7 +165,7 @@ async def assess_student(payload: StudentAssessmentInput, current_user: UserTabl
         rule_interventions.append("Baseline Observational Maintenance: Student is performing securely. Maintain standard tracking.")
 
     # Log straight to Supabase
-    new_assessment = AssessmentTable(
+    new_assessment = StudentRiskAssessment(
         student_id=payload.student_id, user_id=current_user.id,
         features_payload=raw_dict, risk_score=risk_score,
         risk_band=risk_band, prediction=pred_status, shap_analysis=shap_explanation
@@ -208,10 +182,10 @@ async def assess_student(payload: StudentAssessmentInput, current_user: UserTabl
     }
 
 @app.get("/dashboard/history")
-async def get_assessment_history(current_user: UserTable = Depends(get_current_user), db: Session = Depends(get_db)):
-    rows = db.query(AssessmentTable).filter(AssessmentTable.user_id == current_user.id).order_by(AssessmentTable.timestamp.desc()).all()
+async def get_assessment_history(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    rows = db.query(StudentRiskAssessment).filter(StudentRiskAssessment.user_id == current_user.id).order_by(StudentRiskAssessment.created_at.desc()).all()
     return [{
-        "id": r.id, "student_id": r.student_id, "timestamp": r.timestamp.isoformat(),
+        "id": r.id, "student_id": r.student_id, "timestamp": r.created_at.isoformat(),
         "study_time": r.features_payload.get("studytime", 2), "absences": r.features_payload.get("absences", 0),
         "probability": r.risk_score, "prediction": 1 if r.prediction == "AT-RISK" else 0
     } for r in rows]
