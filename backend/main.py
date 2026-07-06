@@ -10,12 +10,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr
 from jose import JWTError, jwt
-from passlib.context import CryptContext
+# from passlib.context import CryptContext
 from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, DateTime, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+import bcrypt
+
+def get_password_hash(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+def verify_password(plain: str, hashed: str) -> bool:
+    return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+
+# pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
 from database import Base, engine, get_db
@@ -103,7 +111,8 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 async def register_faculty(user_in: UserRegister, db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == user_in.email).first():
         raise HTTPException(status_code=400, detail="Email already split registered.")
-    hashed_pwd = pwd_context.hash(user_in.password)
+    # hashed_pwd = pwd_context.hash(user_in.password)
+    hashed_pwd = get_password_hash(user_in.password)
     new_user = User(email=user_in.email, hashed_password=hashed_pwd, name=user_in.name)
     db.add(new_user)
     db.commit()
@@ -115,7 +124,7 @@ async def register_faculty(user_in: UserRegister, db: Session = Depends(get_db))
 @app.post("/auth/login", response_model=Token)
 async def login_faculty(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == form_data.username).first()
-    if not user or not pwd_context.verify(form_data.password, user.hashed_password):
+    if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(status_code=400, detail="Invalid credential parameters.")
     # token = jwt.encode({"sub": user.email}, SECRET_KEY, algorithm=ALGORITHM)
     token = create_access_token({"sub": user.email})
