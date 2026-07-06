@@ -18,3 +18,5 @@ shap==0.52.0
 imbalanced-learn==0.14.2
 scipy==1.17.1
 httpx==0.28.1
+# prevents heavy GPU package from being pulled as a dependency
+--no-binary nvidia-nccl-cu12
