@@ -10,7 +10,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr
 from jose import JWTError, jwt
-# from passlib.context import CryptContext
 from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, DateTime, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
@@ -23,41 +22,38 @@ def get_password_hash(password: str) -> str:
 def verify_password(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
 
-# pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
 from database import Base, engine, get_db
 from models import User, StudentRiskAssessment
 from config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 
-# 4. Model Binary Loader (Dynamic Path Fallback to resolve folder mismatches)
+# Model + SHAP explainer loader — layout is fixed: backend/models/*
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(BASE_DIR, "models", "failsafe_model.pkl")
+EXPLAINER_PATH = os.path.join(BASE_DIR, "models", "shap_explainer.pkl")
+CONFIG_PATH = os.path.join(BASE_DIR, "models", "threshold_config.json")
 
-# Path Option A: Inside the backend folder context
-MODEL_PATH_A = os.path.join(BASE_DIR, "models", "failsafe_model.pkl")
-CONFIG_PATH_A = os.path.join(BASE_DIR, "models", "threshold_config.json")
-
-# Path Option B: Absolute root context fallback
-MODEL_PATH_B = os.path.join(os.path.dirname(BASE_DIR), "backend", "models", "failsafe_model.pkl")
-CONFIG_PATH_B = os.path.join(os.path.dirname(BASE_DIR), "backend", "models", "threshold_config.json")
-
-# Simple verification switch to select the valid file path location
-if os.path.exists(MODEL_PATH_A):
-    chosen_model_path, chosen_config_path = MODEL_PATH_A, CONFIG_PATH_A
-else:
-    chosen_model_path, chosen_config_path = MODEL_PATH_B, CONFIG_PATH_B
+model = None
+explainer = None
+classification_threshold = 0.5
 
 try:
-    model = joblib.load(chosen_model_path)
-    with open(chosen_config_path, "r") as f:
+    model = joblib.load(MODEL_PATH)
+    with open(CONFIG_PATH, "r") as f:
         threshold_config = json.load(f)
     classification_threshold = threshold_config.get("classification_threshold", 0.5)
-    print(f"✅ XGBoost Core Operational. Loaded from: {chosen_model_path}. Threshold: {classification_threshold}")
+    print(f"✅ Model loaded from {MODEL_PATH}. Threshold: {classification_threshold}")
 except Exception as e:
-    print(f"⚠️ Model startup delay / Path error details: {e}")
-    model, classification_threshold = None, 0.5
+    print(f"⚠️ Failed to load model: {e}")
 
-# 5. Data Validation Specs
+try:
+    explainer = joblib.load(EXPLAINER_PATH)
+    print(f"✅ SHAP explainer loaded from {EXPLAINER_PATH}")
+except Exception as e:
+    print(f"⚠️ Failed to load SHAP explainer: {e}")
+
+# Data Validation Specs
 class UserRegister(BaseModel):
     email: EmailStr
     password: str
@@ -79,9 +75,21 @@ class StudentAssessmentInput(BaseModel):
 
 app = FastAPI()
 
+# Tables are created if they don't already exist. Safe to call every startup —
+# create_all() no-ops on tables that are already present (e.g. your Supabase ones).
+Base.metadata.create_all(bind=engine)
+
+# Wildcard origins ("*") cannot be combined with allow_credentials=True — browsers
+# will reject the response. List real frontend origins here (add your deployed
+# frontend URL once it exists).
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",   # Vite dev server
+    "http://localhost:3000",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -106,18 +114,15 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     if user is None: raise exception
     return user
 
-# 6. Auth Gateways
 @app.post("/auth/register", response_model=Token)
 async def register_faculty(user_in: UserRegister, db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == user_in.email).first():
-        raise HTTPException(status_code=400, detail="Email already split registered.")
-    # hashed_pwd = pwd_context.hash(user_in.password)
+        raise HTTPException(status_code=400, detail="An account with this email already exists.")
     hashed_pwd = get_password_hash(user_in.password)
     new_user = User(email=user_in.email, hashed_password=hashed_pwd, name=user_in.name)
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
-    # token = jwt.encode({"sub": new_user.email}, SECRET_KEY, algorithm=ALGORITHM)
     token = create_access_token({"sub": new_user.email})
     return {"access_token": token, "token_type": "bearer", "user_name": new_user.name, "user_email": new_user.email}
 
@@ -125,12 +130,10 @@ async def register_faculty(user_in: UserRegister, db: Session = Depends(get_db))
 async def login_faculty(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == form_data.username).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(status_code=400, detail="Invalid credential parameters.")
-    # token = jwt.encode({"sub": user.email}, SECRET_KEY, algorithm=ALGORITHM)
+        raise HTTPException(status_code=400, detail="Invalid email or password.")
     token = create_access_token({"sub": user.email})
     return {"access_token": token, "token_type": "bearer", "user_name": user.name, "user_email": user.email}
 
-# 7. Lightning Fast Instant Prediction Channel
 @app.post("/predict")
 async def assess_student(payload: StudentAssessmentInput, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if model is None:
@@ -141,28 +144,40 @@ async def assess_student(payload: StudentAssessmentInput, current_user: User = D
         'traveltime', 'famrel', 'freetime', 'goout', 'Dalc', 'Walc', 'health',
         'Medu', 'Fedu', 'schoolsup', 'famsup', 'paid', 'activities', 'higher', 'internet', 'romantic'
     ]
-    
+
     raw_dict = payload.dict()
     ordered_values = [raw_dict[feat] for feat in feature_names]
     input_df = pd.DataFrame([ordered_values], columns=feature_names)
-    
-    # Run structural tree tracking
+
     prob_raw = float(model.predict_proba(input_df)[0][1])
     risk_score = round(prob_raw * 100, 2)
     pred_status = "AT-RISK" if prob_raw >= classification_threshold else "SECURE"
     risk_band = "LOW" if risk_score < 35.0 else "MEDIUM" if risk_score < 65.0 else "HIGH"
 
-    # Fast High-Performance Feature Variance Calculation (0 deadlocks)
-    global_importances = model.feature_importances_
+    # Real per-prediction SHAP values from the pickled TreeExplainer.
+    # Falls back to a rough global-importance heuristic only if the explainer
+    # failed to load, so /predict never hard-fails on this step.
     shap_explanation = {}
-    for name, imp in zip(feature_names, global_importances):
-        # Directional sign guessing based on baseline risks
-        direction = 1 if raw_dict[name] > 2 or name in ['absences', 'failures'] else -1
-        shap_explanation[name] = float(imp * direction * 10)
+    if explainer is not None:
+        try:
+            raw_shap = explainer.shap_values(input_df)
+            if isinstance(raw_shap, list):
+                raw_shap = raw_shap[1] if len(raw_shap) > 1 else raw_shap[0]
+            raw_shap = np.asarray(raw_shap)
+            if raw_shap.ndim == 2:
+                raw_shap = raw_shap[0]
+            shap_explanation = {name: float(val) for name, val in zip(feature_names, raw_shap)}
+        except Exception as e:
+            print(f"⚠️ SHAP explainer call failed, using importance fallback: {e}")
+
+    if not shap_explanation:
+        global_importances = model.feature_importances_
+        for name, imp in zip(feature_names, global_importances):
+            direction = 1 if raw_dict[name] > 2 or name in ['absences', 'failures'] else -1
+            shap_explanation[name] = float(imp * direction * 10)
 
     top_factors = sorted(shap_explanation.items(), key=lambda x: abs(x[1]), reverse=True)[:5]
 
-    # Baseline Static Interventions
     rule_interventions = []
     if payload.absences > 8:
         rule_interventions.append("Attendance Recovery Track: Immediate advisor meeting to flag structural absenteeism.")
@@ -173,7 +188,6 @@ async def assess_student(payload: StudentAssessmentInput, current_user: User = D
     if not rule_interventions:
         rule_interventions.append("Baseline Observational Maintenance: Student is performing securely. Maintain standard tracking.")
 
-    # Log straight to Supabase
     new_assessment = StudentRiskAssessment(
         student_id=payload.student_id, user_id=current_user.id,
         features_payload=raw_dict, risk_score=risk_score,
@@ -201,4 +215,8 @@ async def get_assessment_history(current_user: User = Depends(get_current_user),
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "model_loaded": model is not None}
+    return {
+        "status": "healthy",
+        "model_loaded": model is not None,
+        "explainer_loaded": explainer is not None,
+    }
