@@ -10,29 +10,32 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr
 from jose import JWTError, jwt
-from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, DateTime, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 
 import bcrypt
 
+from database import Base, engine, get_db
+from models import User, StudentRiskAssessment
+from config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
+
+
+# ── Password helpers ──────────────────────────────────────────────────────
 def get_password_hash(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 def verify_password(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
 
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
-from database import Base, engine, get_db
-from models import User, StudentRiskAssessment
-from config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 
-# Model + SHAP explainer loader — layout is fixed: backend/models/*
+# ── Model loader ──────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, "models", "failsafe_model.pkl")
+MODEL_PATH     = os.path.join(BASE_DIR, "models", "failsafe_model.pkl")
 EXPLAINER_PATH = os.path.join(BASE_DIR, "models", "shap_explainer.pkl")
-CONFIG_PATH = os.path.join(BASE_DIR, "models", "threshold_config.json")
+CONFIG_PATH    = os.path.join(BASE_DIR, "models", "threshold_config.json")
 
 model = None
 explainer = None
@@ -43,17 +46,44 @@ try:
     with open(CONFIG_PATH, "r") as f:
         threshold_config = json.load(f)
     classification_threshold = threshold_config.get("classification_threshold", 0.5)
-    print(f"✅ Model loaded from {MODEL_PATH}. Threshold: {classification_threshold}")
+    print(f"✅ Model loaded. Threshold: {classification_threshold}")
 except Exception as e:
     print(f"⚠️ Failed to load model: {e}")
 
 try:
     explainer = joblib.load(EXPLAINER_PATH)
-    print(f"✅ SHAP explainer loaded from {EXPLAINER_PATH}")
+    print(f"✅ SHAP explainer loaded.")
 except Exception as e:
     print(f"⚠️ Failed to load SHAP explainer: {e}")
 
-# Data Validation Specs
+
+# ── SHAP Intervention Map (module-level constant — correct) ───────────────
+SHAP_INTERVENTION_MAP = {
+    "absences":  {"positive": "Attendance Recovery Track: Student shows high absenteeism as a key risk driver. Schedule immediate advisor check-in and implement weekly attendance monitoring.", "negative": None},
+    "failures":  {"positive": "Academic Remediation: Prior course failures are a top risk signal. Enroll student in subject-specific bootcamps and assign a dedicated peer tutor.", "negative": None},
+    "G2":        {"positive": None, "negative": "Grade Improvement Plan: Recent period grade is dragging risk up. Set bi-weekly faculty review meetings to track grade trajectory."},
+    "G1":        {"positive": None, "negative": "Early Academic Support: First period grade indicates foundational gaps. Recommend diagnostic assessment and foundational skill workshops."},
+    "studytime": {"positive": None, "negative": "Study Habit Intervention: Low weekly study hours are a primary risk factor. Mandate structured study sessions with a minimum of 5 hours/week."},
+    "goout":     {"positive": "Social Balance Counseling: High social activity is contributing to risk. Recommend time-management counseling to rebalance priorities.", "negative": None},
+    "Walc":      {"positive": "Wellness Referral: Weekend alcohol consumption is flagged as a risk driver. Refer student to campus wellness and counseling services.", "negative": None},
+    "Dalc":      {"positive": "Wellness Referral: Weekday alcohol consumption is a significant risk contributor. Immediate referral to student support and wellness program.", "negative": None},
+    "health":    {"positive": None, "negative": "Health Support: Poor self-reported health is elevating risk. Connect student with campus health services and reduce academic overload."},
+    "famrel":    {"positive": None, "negative": "Family Engagement: Poor family relationship quality is a risk signal. Involve family in a structured support meeting with a school counselor."},
+    "Medu":      {"positive": None, "negative": "Parental Education Gap: Low mother education level correlates with reduced home academic support. Provide additional faculty-led office hours."},
+    "Fedu":      {"positive": None, "negative": "Parental Education Gap: Low father education level correlates with reduced home academic support. Provide additional faculty-led office hours."},
+    "higher":    {"positive": None, "negative": "Motivation Intervention: Student does not aspire to higher education — a key risk driver. Schedule career counseling and goal-setting sessions."},
+    "internet":  {"positive": None, "negative": "Resource Access: Lack of home internet access is contributing to risk. Provide access to campus digital labs and offline study materials."},
+    "traveltime":{"positive": "Commute Burden: Long travel time is flagging as a risk factor. Explore on-campus housing options or schedule adjustments to reduce fatigue.", "negative": None},
+    "freetime":  {"positive": "Time Management: Excess free time is a risk signal. Channel into structured extracurricular or supervised study programs.", "negative": None},
+    "romantic":  {"positive": "Wellbeing Check-in: Romantic relationship is flagged as a distraction risk. Schedule a confidential wellbeing session with a student counselor.", "negative": None},
+    "schoolsup": {"positive": None, "negative": "School Support Enrollment: Student is not receiving extra school support despite risk signals. Enroll in after-school academic support program."},
+    "famsup":    {"positive": None, "negative": "Family Support Gap: Absence of family academic support is a risk driver. Arrange parent-teacher meeting to establish a home support structure."},
+    "activities":{"positive": None, "negative": "Extracurricular Engagement: Lack of activities correlates with disengagement risk. Recommend joining at least one structured school club or sport."},
+    "paid":      {"positive": None, "negative": "Tutoring Access: Student is not attending paid classes despite academic risk. Explore subsidized tutoring options through the institution."},
+}
+
+
+# ── Pydantic schemas ──────────────────────────────────────────────────────
 class UserRegister(BaseModel):
     email: EmailStr
     password: str
@@ -67,23 +97,36 @@ class Token(BaseModel):
 
 class StudentAssessmentInput(BaseModel):
     student_id: str
-    G1: int; G2: int; absences: int; failures: int; studytime: int
-    traveltime: int; famrel: int; freetime: int; goout: int; Dalc: int
-    Walc: int; health: int; schoolsup: int; famsup: int; paid: int
-    activities: int; higher: int; internet: int; romantic: int
-    Medu: int; Fedu: int
+    G1: int
+    G2: int
+    absences: int
+    failures: int
+    studytime: int
+    traveltime: int
+    famrel: int
+    freetime: int
+    goout: int
+    Dalc: int
+    Walc: int
+    health: int
+    schoolsup: int
+    famsup: int
+    paid: int
+    activities: int
+    higher: int
+    internet: int
+    romantic: int
+    Medu: int
+    Fedu: int
 
+
+# ── App + CORS ────────────────────────────────────────────────────────────
 app = FastAPI()
 
-# Tables are created if they don't already exist. Safe to call every startup —
-# create_all() no-ops on tables that are already present (e.g. your Supabase ones).
 Base.metadata.create_all(bind=engine)
 
-# Wildcard origins ("*") cannot be combined with allow_credentials=True — browsers
-# will reject the response. List real frontend origins here (add your deployed
-# frontend URL once it exists).
 ALLOWED_ORIGINS = [
-    "http://localhost:5173",   # Vite dev server
+    "http://localhost:5173",
     "http://localhost:3000",
 ]
 
@@ -96,6 +139,7 @@ app.add_middleware(
 )
 
 
+# ── Auth helpers ──────────────────────────────────────────────────────────
 def create_access_token(data: dict):
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -107,13 +151,17 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         email: str = payload.get("sub")
-        if email is None: raise exception
+        if email is None:
+            raise exception
     except JWTError:
         raise exception
     user = db.query(User).filter(User.email == email).first()
-    if user is None: raise exception
+    if user is None:
+        raise exception
     return user
 
+
+# ── Routes ────────────────────────────────────────────────────────────────
 @app.post("/auth/register", response_model=Token)
 async def register_faculty(user_in: UserRegister, db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == user_in.email).first():
@@ -126,6 +174,7 @@ async def register_faculty(user_in: UserRegister, db: Session = Depends(get_db))
     token = create_access_token({"sub": new_user.email})
     return {"access_token": token, "token_type": "bearer", "user_name": new_user.name, "user_email": new_user.email}
 
+
 @app.post("/auth/login", response_model=Token)
 async def login_faculty(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == form_data.username).first()
@@ -134,18 +183,23 @@ async def login_faculty(form_data: OAuth2PasswordRequestForm = Depends(), db: Se
     token = create_access_token({"sub": user.email})
     return {"access_token": token, "token_type": "bearer", "user_name": user.name, "user_email": user.email}
 
+
 @app.post("/predict")
-async def assess_student(payload: StudentAssessmentInput, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def assess_student(
+    payload: StudentAssessmentInput,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     if model is None:
         raise HTTPException(status_code=503, detail="Model assets compiling.")
 
     feature_names = [
-        'G1', 'G2', 'failures', 'studytime', 'absences',
-        'traveltime', 'famrel', 'freetime', 'goout', 'Dalc', 'Walc', 'health',
-        'Medu', 'Fedu', 'schoolsup', 'famsup', 'paid', 'activities', 'higher', 'internet', 'romantic'
+        "G1", "G2", "failures", "studytime", "absences",
+        "traveltime", "famrel", "freetime", "goout", "Dalc", "Walc", "health",
+        "Medu", "Fedu", "schoolsup", "famsup", "paid", "activities", "higher", "internet", "romantic",
     ]
 
-    raw_dict = payload.dict()
+    raw_dict = payload.model_dump()
     ordered_values = [raw_dict[feat] for feat in feature_names]
     input_df = pd.DataFrame([ordered_values], columns=feature_names)
 
@@ -154,9 +208,7 @@ async def assess_student(payload: StudentAssessmentInput, current_user: User = D
     pred_status = "AT-RISK" if prob_raw >= classification_threshold else "SECURE"
     risk_band = "LOW" if risk_score < 35.0 else "MEDIUM" if risk_score < 65.0 else "HIGH"
 
-    # Real per-prediction SHAP values from the pickled TreeExplainer.
-    # Falls back to a rough global-importance heuristic only if the explainer
-    # failed to load, so /predict never hard-fails on this step.
+    # SHAP values
     shap_explanation = {}
     if explainer is not None:
         try:
@@ -173,45 +225,76 @@ async def assess_student(payload: StudentAssessmentInput, current_user: User = D
     if not shap_explanation:
         global_importances = model.feature_importances_
         for name, imp in zip(feature_names, global_importances):
-            direction = 1 if raw_dict[name] > 2 or name in ['absences', 'failures'] else -1
+            direction = 1 if raw_dict[name] > 2 or name in ["absences", "failures"] else -1
             shap_explanation[name] = float(imp * direction * 10)
 
     top_factors = sorted(shap_explanation.items(), key=lambda x: abs(x[1]), reverse=True)[:5]
 
+    # SHAP-driven interventions
     rule_interventions = []
-    if payload.absences > 8:
-        rule_interventions.append("Attendance Recovery Track: Immediate advisor meeting to flag structural absenteeism.")
-    if payload.studytime <= 2:
-        rule_interventions.append("Academic Structural Support: Recommend a minimum of 4 hours of weekly peer tutoring.")
-    if payload.failures > 0 or payload.G2 < 10:
-        rule_interventions.append("Targeted Skill Remediation: Enroll student in mandatory weekend subject bootcamps.")
+    for feature_name, shap_val in top_factors:
+        direction = "positive" if shap_val > 0 else "negative"
+        message = SHAP_INTERVENTION_MAP.get(feature_name, {}).get(direction)
+        if message and message not in rule_interventions:
+            rule_interventions.append(message)
+        if len(rule_interventions) == 3:
+            break
+
     if not rule_interventions:
-        rule_interventions.append("Baseline Observational Maintenance: Student is performing securely. Maintain standard tracking.")
+        rule_interventions.append(
+            "Baseline Observational Maintenance: Model confidence is low for this profile. "
+            "Continue standard monitoring with a scheduled monthly faculty check-in."
+        )
 
     new_assessment = StudentRiskAssessment(
-        student_id=payload.student_id, user_id=current_user.id,
-        features_payload=raw_dict, risk_score=risk_score,
-        risk_band=risk_band, prediction=pred_status, shap_analysis=shap_explanation
+        student_id=payload.student_id,
+        user_id=current_user.id,
+        features_payload=raw_dict,
+        risk_score=risk_score,
+        risk_band=risk_band,
+        prediction=pred_status,
+        shap_analysis=shap_explanation,
     )
     db.add(new_assessment)
     db.commit()
 
     return {
-        "student_id": payload.student_id, "risk_score": risk_score,
-        "risk_band": risk_band, "prediction": pred_status,
-        "top_factors": top_factors, "shap_analysis": shap_explanation,
-        "rule_interventions": rule_interventions, "intervention_plan": " ".join(rule_interventions),
-        "plan_source": "rules"
+        "student_id": payload.student_id,
+        "risk_score": risk_score,
+        "risk_band": risk_band,
+        "prediction": pred_status,
+        "top_factors": top_factors,
+        "shap_analysis": shap_explanation,
+        "rule_interventions": rule_interventions,
+        "intervention_plan": " ".join(rule_interventions),
+        "plan_source": "shap",
     }
 
+
 @app.get("/dashboard/history")
-async def get_assessment_history(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    rows = db.query(StudentRiskAssessment).filter(StudentRiskAssessment.user_id == current_user.id).order_by(StudentRiskAssessment.created_at.desc()).all()
-    return [{
-        "id": r.id, "student_id": r.student_id, "timestamp": r.created_at.isoformat(),
-        "study_time": r.features_payload.get("studytime", 2), "absences": r.features_payload.get("absences", 0),
-        "probability": r.risk_score, "prediction": 1 if r.prediction == "AT-RISK" else 0
-    } for r in rows]
+async def get_assessment_history(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    rows = (
+        db.query(StudentRiskAssessment)
+        .filter(StudentRiskAssessment.user_id == current_user.id)
+        .order_by(StudentRiskAssessment.created_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": r.id,
+            "student_id": r.student_id,
+            "timestamp": r.created_at.isoformat(),
+            "study_time": r.features_payload.get("studytime", 2),
+            "absences": r.features_payload.get("absences", 0),
+            "probability": r.risk_score,
+            "prediction": 1 if r.prediction == "AT-RISK" else 0,
+        }
+        for r in rows
+    ]
+
 
 @app.get("/health")
 async def health_check():
