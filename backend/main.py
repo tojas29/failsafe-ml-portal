@@ -12,12 +12,14 @@ from pydantic import BaseModel, EmailStr
 from jose import JWTError, jwt
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
+from groq import Groq
 
 import bcrypt
 
 from database import Base, engine, get_db
 from models import User, StudentRiskAssessment
 from config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
+groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 
 # ── Password helpers ──────────────────────────────────────────────────────
@@ -183,6 +185,40 @@ async def login_faculty(form_data: OAuth2PasswordRequestForm = Depends(), db: Se
     token = create_access_token({"sub": user.email})
     return {"access_token": token, "token_type": "bearer", "user_name": user.name, "user_email": user.email}
 
+def generate_llm_intervention(student_data: dict, top_factors: list, risk_band: str, pred_status: str) -> str:
+    try:
+        factors_text = "\n".join(
+            [f"- {name}: SHAP value {val:+.3f} ({'increases' if val > 0 else 'decreases'} risk)"
+             for name, val in top_factors]
+        )
+        prompt = f"""You are an academic counselor AI. A student has been assessed as {pred_status} (Risk Band: {risk_band}).
+
+Top SHAP risk factors for this student:
+{factors_text}
+
+Student profile summary:
+- G1 (Period 1 grade): {student_data.get('G1')}/20
+- G2 (Period 2 grade): {student_data.get('G2')}/20
+- Absences: {student_data.get('absences')} days
+- Study time per week: {student_data.get('studytime')} (1=<2hrs, 2=2-5hrs, 3=5-10hrs, 4=>10hrs)
+- Past failures: {student_data.get('failures')}
+- Goes out with friends: {student_data.get('goout')}/5
+- Alcohol (weekday/weekend): {student_data.get('Dalc')}/{student_data.get('Walc')} out of 5
+
+Write exactly 3 specific, actionable intervention recommendations for this student. 
+Be concise. Each recommendation should be 1-2 sentences. Number them 1, 2, 3."""
+
+        response = groq_client.chat.completions.create(
+            model="llama3-8b-8192",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=300,
+            temperature=0.4,
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"⚠️ Groq API failed: {e}")
+        return None
+
 
 @app.post("/predict")
 async def assess_student(
@@ -230,22 +266,29 @@ async def assess_student(
 
     top_factors = sorted(shap_explanation.items(), key=lambda x: abs(x[1]), reverse=True)[:5]
 
-    # SHAP-driven interventions
-    rule_interventions = []
-    for feature_name, shap_val in top_factors:
-        direction = "positive" if shap_val > 0 else "negative"
-        message = SHAP_INTERVENTION_MAP.get(feature_name, {}).get(direction)
-        if message and message not in rule_interventions:
-            rule_interventions.append(message)
-        if len(rule_interventions) == 3:
-            break
+    # ── Intervention: LLM first, SHAP map fallback ────────────────────────
+    llm_plan = generate_llm_intervention(raw_dict, top_factors, risk_band, pred_status)
 
-    if not rule_interventions:
-        rule_interventions.append(
-            "Baseline Observational Maintenance: Model confidence is low for this profile. "
-            "Continue standard monitoring with a scheduled monthly faculty check-in."
-        )
+    if llm_plan:
+        rule_interventions = [llm_plan]
+        plan_source = "llm"
+    else:
+        rule_interventions = []
+        for feature_name, shap_val in top_factors:
+            direction = "positive" if shap_val > 0 else "negative"
+            message = SHAP_INTERVENTION_MAP.get(feature_name, {}).get(direction)
+            if message and message not in rule_interventions:
+                rule_interventions.append(message)
+            if len(rule_interventions) == 3:
+                break
+        if not rule_interventions:
+            rule_interventions.append(
+                "Baseline Observational Maintenance: Continue standard monitoring "
+                "with a scheduled monthly faculty check-in."
+            )
+        plan_source = "shap"
 
+    # ── Save to DB ────────────────────────────────────────────────────────
     new_assessment = StudentRiskAssessment(
         student_id=payload.student_id,
         user_id=current_user.id,
@@ -267,7 +310,7 @@ async def assess_student(
         "shap_analysis": shap_explanation,
         "rule_interventions": rule_interventions,
         "intervention_plan": " ".join(rule_interventions),
-        "plan_source": "shap",
+        "plan_source": plan_source,
     }
 
 
