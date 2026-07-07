@@ -130,6 +130,7 @@ Base.metadata.create_all(bind=engine)
 ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://localhost:3000",
+    "https://failsafe-ml-portal.vercel.app/"
 ]
 
 app.add_middleware(
@@ -312,7 +313,6 @@ async def assess_student(
         "intervention_plan": " ".join(rule_interventions),
         "plan_source": plan_source,
     }
-
 
 @app.get("/dashboard/history")
 async def get_assessment_history(
