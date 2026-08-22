@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import axios from "axios";
 
 // Target your live Render api backend gateway instance
-const API_BASE = "https://failsafe-ml-portal.onrender.com";
+const API_BASE = "https://failsafe-ml-portal-e6dd.onrender.com";
 
 function App() {
   // 1. Session & Routing Core State Hooks (With Crash-Proof Safe Initialization)
